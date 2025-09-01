@@ -196,3 +196,106 @@
     (ok true)
   )
 )
+
+;; Identity Verification - Administrative quality control
+(define-public (approve-member (candidate principal))
+  (begin
+    ;; Restrict to protocol administrators
+    (asserts! (verify-admin-access) ERR-ADMIN-REQUIRED)
+    ;; Verify candidate is registered
+    (asserts! (is-some (map-get? community-members candidate))
+      ERR-UNREGISTERED-USER
+    )
+
+    ;; Grant verification status
+    (map-set community-members candidate
+      (merge
+        (unwrap! (map-get? community-members candidate) ERR-UNREGISTERED-USER) { verification-complete: true }
+      ))
+    (ok true)
+  )
+)
+
+;; Universal Basic Income Distribution - Core value proposition
+(define-public (receive-income)
+  (let (
+      (beneficiary tx-sender)
+      (payout-size (var-get base-income-amount))
+    )
+    ;; Protocol operational checks
+    (asserts! (var-get protocol-active) ERR-PROTOCOL-SUSPENDED)
+    ;; Eligibility verification (includes cooldown, verification, treasury)
+    (asserts! (calculate-distribution-eligibility beneficiary)
+      ERR-VERIFICATION-PENDING
+    )
+    ;; Treasury adequacy confirmation
+    (asserts! (>= (var-get community-treasury) payout-size) ERR-TREASURY-DEPLETED)
+
+    ;; Execute Bitcoin-secured STX transfer
+    (try! (as-contract (stx-transfer? payout-size tx-sender beneficiary)))
+
+    ;; Update treasury accounting
+    (var-set community-treasury (- (var-get community-treasury) payout-size))
+
+    ;; Record successful distribution
+    (try! (process-successful-claim beneficiary payout-size))
+
+    (ok payout-size)
+  )
+)
+
+;; Treasury Funding - Community-driven sustainability
+(define-public (fund-treasury (contribution-amount uint))
+  (begin
+    ;; Validate contribution parameters
+    (asserts! (> contribution-amount u0) ERR-INVALID-CONTRIBUTION)
+    (asserts! (var-get protocol-active) ERR-PROTOCOL-SUSPENDED)
+
+    ;; Process STX contribution to protocol treasury
+    (try! (stx-transfer? contribution-amount tx-sender (as-contract tx-sender)))
+
+    ;; Update treasury reserves
+    (var-set community-treasury
+      (+ (var-get community-treasury) contribution-amount)
+    )
+
+    (ok contribution-amount)
+  )
+)
+
+;; DEMOCRATIC GOVERNANCE SYSTEM 
+
+;; Proposal Submission - Community-driven protocol evolution
+(define-public (propose-change
+    (parameter-category (string-ascii 32))
+    (new-value uint)
+  )
+  (let ((next-proposal-id (+ (var-get governance-proposal-index) u1)))
+    ;; Membership requirement for governance participation
+    (asserts! (is-some (map-get? community-members tx-sender))
+      ERR-UNREGISTERED-USER
+    )
+    ;; Validate proposal parameters
+    (asserts! (validate-proposal-category parameter-category)
+      ERR-MALFORMED-PROPOSAL
+    )
+    (asserts! (validate-proposed-amount new-value) ERR-VALUE-OUT-OF-BOUNDS)
+    ;; Ensure protocol accepts new proposals
+    (asserts! (var-get protocol-active) ERR-PROTOCOL-SUSPENDED)
+
+    ;; Create governance proposal record
+    (map-set community-proposals next-proposal-id {
+      creator: tx-sender,
+      category: parameter-category,
+      target-value: new-value,
+      support-votes: u0,
+      opposition-votes: u0,
+      current-status: "active",
+      deadline-block: (+ stacks-block-height VOTING-DURATION),
+    })
+
+    ;; Increment proposal counter
+    (var-set governance-proposal-index next-proposal-id)
+    (ok next-proposal-id)
+  )
+)
