@@ -99,3 +99,100 @@
     deadline-block: uint, ;; Voting cutoff point
   }
 )
+
+;; Vote tracking system - prevents governance manipulation
+(define-map participation-records
+  {
+    proposal-ref: uint,
+    participant: principal,
+  }
+  bool
+)
+
+;; INTERNAL UTILITY FUNCTIONS  
+
+;; Administrative privilege verification - protocol security
+(define-private (verify-admin-access)
+  (is-eq tx-sender PROTOCOL-ADMIN)
+)
+
+;; Universal Basic Income eligibility engine - core protocol logic
+(define-private (calculate-distribution-eligibility (participant principal))
+  (match (map-get? community-members participant)
+    member-profile
+    (and
+      ;; Must be verified community member
+      (get verification-complete member-profile)
+      ;; Respects distribution timing (Bitcoin-aligned cycles)
+      (>= (- stacks-block-height (get latest-claim-block member-profile))
+        PAYOUT-CYCLE-BLOCKS
+      )
+      ;; Treasury has sufficient reserves
+      (>= (var-get community-treasury) (var-get base-income-amount))
+      ;; Protocol is operational
+      (var-get protocol-active)
+    )
+    ;; Unregistered users are ineligible
+    false
+  )
+)
+
+;; Participant record management - maintains accurate state
+(define-private (process-successful-claim
+    (recipient principal)
+    (payout-amount uint)
+  )
+  (match (map-get? community-members recipient)
+    current-profile (ok (map-set community-members recipient
+      (merge current-profile {
+        latest-claim-block: stacks-block-height,
+        lifetime-earnings: (+ (get lifetime-earnings current-profile) payout-amount),
+        distribution-count: (+ (get distribution-count current-profile) u1),
+      })
+    ))
+    ERR-UNREGISTERED-USER
+  )
+)
+
+;; Governance parameter validation - prevents system abuse
+(define-private (validate-proposal-category (category (string-ascii 32)))
+  (or
+    (is-eq category "base-income-amount") ;; UBI payout size
+    (is-eq category "payout-cycle-blocks") ;; Distribution frequency
+    (is-eq category "reserve-floor") ;; Minimum treasury balance
+  )
+)
+
+;; Economic bounds checking - maintains protocol stability
+(define-private (validate-proposed-amount (amount uint))
+  (and
+    (> amount u0) ;; Must be positive value
+    (<= amount GOVERNANCE-CEILING) ;; Prevents economic attacks
+  )
+)
+
+;; PUBLIC INTERFACE - CORE OPERATIONS
+
+;; Community Enrollment - Gateway to Bitcoin-secured income
+(define-public (join-community)
+  (let ((existing-membership (map-get? community-members tx-sender)))
+    ;; Prevent duplicate registrations
+    (asserts! (is-none existing-membership) ERR-DUPLICATE-REGISTRATION)
+    ;; Ensure protocol is operational
+    (asserts! (var-get protocol-active) ERR-PROTOCOL-SUSPENDED)
+
+    ;; Create new community member profile
+    (map-set community-members tx-sender {
+      is-registered: true,
+      verification-complete: false, ;; Requires admin verification
+      enrollment-block: stacks-block-height,
+      latest-claim-block: u0,
+      lifetime-earnings: u0,
+      distribution-count: u0,
+    })
+
+    ;; Update global participation metrics
+    (var-set active-participants (+ (var-get active-participants) u1))
+    (ok true)
+  )
+)
