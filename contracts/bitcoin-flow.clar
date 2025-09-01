@@ -299,3 +299,122 @@
     (ok next-proposal-id)
   )
 )
+
+;; Democratic Voting - Community consensus mechanism
+(define-public (cast-vote
+    (proposal-reference uint)
+    (support-proposal bool)
+  )
+  (let (
+      (proposal-data (unwrap! (map-get? community-proposals proposal-reference)
+        ERR-MALFORMED-PROPOSAL
+      ))
+      (vote-key {
+        proposal-ref: proposal-reference,
+        participant: tx-sender,
+      })
+    )
+    ;; Verify voter eligibility
+    (asserts! (is-some (map-get? community-members tx-sender))
+      ERR-UNREGISTERED-USER
+    )
+    ;; Prevent double voting
+    (asserts! (is-none (map-get? participation-records vote-key))
+      ERR-DUPLICATE-VOTE
+    )
+    ;; Validate proposal exists and timing
+    (asserts! (<= proposal-reference (var-get governance-proposal-index))
+      ERR-MALFORMED-PROPOSAL
+    )
+    (asserts! (< stacks-block-height (get deadline-block proposal-data))
+      ERR-PROPOSAL-EXPIRED
+    )
+    (asserts! (is-eq (get current-status proposal-data) "active")
+      ERR-MALFORMED-PROPOSAL
+    )
+
+    ;; Record vote participation
+    (map-set participation-records vote-key true)
+
+    ;; Update proposal vote tallies
+    (map-set community-proposals proposal-reference
+      (merge proposal-data {
+        support-votes: (if support-proposal
+          (+ (get support-votes proposal-data) u1)
+          (get support-votes proposal-data)
+        ),
+        opposition-votes: (if support-proposal
+          (get opposition-votes proposal-data)
+          (+ (get opposition-votes proposal-data) u1)
+        ),
+      })
+    )
+    (ok true)
+  )
+)
+
+;; EMERGENCY SAFEGUARDS     
+
+;; Protocol Suspension - Crisis management capability
+(define-public (suspend-protocol)
+  (begin
+    ;; Restrict to protocol administrators
+    (asserts! (verify-admin-access) ERR-ADMIN-REQUIRED)
+    ;; Halt all protocol operations
+    (var-set protocol-active false)
+    (ok true)
+  )
+)
+
+;; Protocol Reactivation - Resume normal operations
+(define-public (reactivate-protocol)
+  (begin
+    ;; Administrative authorization required
+    (asserts! (verify-admin-access) ERR-ADMIN-REQUIRED)
+    ;; Restore protocol functionality
+    (var-set protocol-active true)
+    (ok true)
+  )
+)
+
+;; PUBLIC DATA ACCESS FUNCTIONS 
+
+;; Member Profile Retrieval - Transparent participant data
+(define-read-only (fetch-member-profile (member principal))
+  (map-get? community-members member)
+)
+
+;; Treasury Status - Real-time Bitcoin-secured reserves
+(define-read-only (fetch-treasury-status)
+  (var-get community-treasury)
+)
+
+;; Governance Proposal Details - Democratic transparency
+(define-read-only (fetch-proposal-details (proposal-id uint))
+  (map-get? community-proposals proposal-id)
+)
+
+;; Protocol Metrics Dashboard - Comprehensive system overview
+(define-read-only (fetch-protocol-metrics)
+  {
+    current-payout: (var-get base-income-amount),
+    cycle-duration: PAYOUT-CYCLE-BLOCKS,
+    last-distribution: (var-get previous-distribution-block),
+    treasury-minimum: RESERVE-FLOOR,
+    community-size: (var-get active-participants),
+  }
+)
+
+;; Income Eligibility Check - Real-time claim verification
+(define-read-only (check-income-eligibility (potential-recipient principal))
+  (calculate-distribution-eligibility potential-recipient)
+)
+
+;;  Protocol Health Monitor - Administrative oversight
+(define-read-only (fetch-system-status)
+  {
+    is-operational: (var-get protocol-active),
+    protocol-administrator: PROTOCOL-ADMIN,
+    governance-proposals-total: (var-get governance-proposal-index),
+  }
+)
